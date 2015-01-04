@@ -1,0 +1,201 @@
+XError
+======
+This is a small C library to help with error handling for error reporting.
+
+This library helps you deal with errors by capturing conditions which indicate
+that an error occured. These conditions are expressions and they're captured
+inside macro applications. One of these macros is the ErrLt0 macro, it checks
+if its given expression is less than 0, and if so it understands it as an error
+signal. For example:
+
+  ErrLt0(SDL_Init(SDL_INIT_VIDEO), SDL_GetError());
+
+This conceptually translates to:
+
+  int test = SDL_Init(SDL_INIT_VIDEO);
+  if (test < 0) {
+    <CODE TO ISSUE AN ERROR>
+    return test;
+  }
+
+This "<CODE TO ISSUE AN ERROR>" will be explained later.
+
+The header XError.h basically defines a set of foundations types and functions
+to report errors and a bunch of macros which help you make use of these
+underlying features.
+
+Basically, to report an error you use the XERR_LinkError functions:
+
+  int
+  XERR_LinkError(const char *msg,
+                 int line,
+                 const char *file_name,
+                 const char *func_name,
+                 const char *code);
+
+It copies all the content given to it to an internally managed structure of
+ErrorInfo elements:
+
+  struct ErrorInfo {
+    struct BasicString msg, file_name, func_name, code;
+    int line;
+    struct ErrorInfo *next;
+  };
+
+  struct BasicString {
+    char *data;
+    int len;
+  };
+
+The "<CODE TO ISSUE AN ERROR>" piece above makes use of the preprocessor to
+fill in the form for you by calling XERR_LinkError using facilities like
+__LINE__, __func__ and so on:
+
+  #define ErrLt0(EXPR, MSG) \
+    do { \
+      int X_ERROR_test = (EXPR); \
+      if (X_ERROR_test < 0) { \
+        XERR_LinkError((MSG), __LINE__, __FILE__, __func__, # EXPR); \
+        return X_ERROR_test; \
+      } \
+    } while (0)
+
+XERR_LinkError allows you to pass it null as the message, in which case it
+won't error. It'll simply understand that there is no error message accompaning
+the issued error info. This is useful when you just want to propagate or pass
+on an error, but build a track of calls.
+
+  int
+  InitSdl(void) {
+    /* ... */
+    ErrLt0(SDL_Init(SDL_INIT_VIDEO), SDL_GetError());
+    /* ... */
+  }
+
+  int
+  Init(void) {
+    /* ... */
+    ErrLt0(InitSdl(), 0);
+    /* ... */
+  }
+
+A possibility is to use the PErrLt0 instead, which will pass the 0 for you.
+
+  #define PErrLt0(EXPR) ErrLt0(EXPR, 0)
+
+This way, you can add macro applications to your code (which, yes, can make
+things messier), and have a sequence of error information structures be built
+for you whenever there is an error.
+
+When an error happens and you want to handle it, just don't propagate the
+error. Get the error return code and write some logic to deal with it. This
+library doesn't attempt to give you a general way for you to handle your
+errors. What it gives you is a way to handle reporting errors when they happen.
+So to report an error, you copy the internal error structures kept by the
+XError library and go through it yourself to generate your error report. For
+example:
+
+  static const char *
+  FmtMessage(const char *msg, const char *alt) {
+    return msg ? (*msg ? msg : alt) : alt;
+  }
+
+  void
+  ReportError(void) {
+    struct ErrorInfo *err = XERR_CopyError();
+    const char *fmt = "\t%s: L%d: %s: %s\n"
+      "\t\t%s\n";
+    fputs("Error! Aborting program.\n"
+           "Bread Crumbs:\n"
+           "=============\n", stderr);
+    for (struct ErrorInfo *p = err; p; p = p->next) {
+      fprintf(stderr, fmt,
+        FmtMessage(p->file_name.data, "(missing file name)"),
+        p->line,
+        FmtMessage(p->func_name.data, "(missing function name)"),
+        FmtMessage(p->msg.data, "(missing message)"),
+        FmtMessage(p->code.data, "(missing code)"));
+    }
+    fmt = "\n\tSDL_GetError() => %s\n"
+      "\tIMG_GetError() => %s\n"
+      "\tTTF_GetError() => %s\n"
+      "\tMix_GetError() => %s\n";
+    fprintf(stderr, fmt,
+      FmtMessage(SDL_GetError(), "(empty)"),
+      FmtMessage(IMG_GetError(), "(empty)"),
+      FmtMessage(TTF_GetError(), "(empty)"),
+      FmtMessage(Mix_GetError(), "(empty)"));
+    if (err) {
+      XERR_FreeError(err);
+    }
+  }
+
+XERR_CopyError will copy the whole internal structure and give it to you. It's
+a linked list as the ErrorInfo struct suggests. And you can then traverse it
+as such. XERR_FreeError will free the memory allocated by XERR_CopyError in
+the process of copying the internal error structure.
+
+  Attention: XERR_FreeError(0) will free the internal structure. It'll clean
+  it up and forget about it so you can start over tracking errors.
+
+Contention Points
+=================
+- XERR_FreeError might be modified to do nothing if given null. A new function
+would be introduced to free the internal structure.
+- The prefix may change to XErr. XERR seems too ugly.
+- The error structure collection may be changed from a linked list into an
+array.
+
+This last entry deserves some comment.
+
+Even though internally for the XError library things get easy when a linked
+list is used, and one will probably still be used. For the programmer calling
+XERR_CopyError, there is no good reason for not giving back an array.
+
+XFlow
+=====
+XFlow.h is an accompaning header file which makes some one liners clear and
+easy to read. For example, if you want to break if something is false:
+
+  while (<Cond>) {
+    <DoSomething>
+    BreakIf0(<ShouldBeFalseToBreak>);
+    <DoSomethingElse>
+  }
+
+It's purely a header file full of macros:
+
+  DoIf(cond, effect)
+  DoLt0(expr, effect)
+  DoIf0(expr, effect)
+
+  ReturnIf(cond, val)
+  ReturnLt0(expr, val)
+  ReturnIf0(expr, val)
+  ReturnMeLt0(expr)
+
+  GotoIf(cond, label)
+  GotoLt0(expr, label)
+  GotoIf0(expr, label)
+
+  BreakIf(cond)
+  BreakLt0(expr)
+  BreakIf0(expr)
+
+  ContinueIf(cond)
+  ContinueLt0(expr)
+  ContinueIf0(expr)
+
+The Do* macros exist only to facilitate the implementation of the other ones.
+I don't personally encourage the use of DoIf even though I see nothing wrong
+with it. The ReturnMeLt0 will return the expression if it's less than 0.
+
+Local Variables
+===============
+As seen previously, some of the macros make use of local variables to avoid
+double evaluation. Whenever those are used, they're prefixed with X_ERROR_ or
+X_FLOW_, so you should avoid those names in your code.
+
+Thread Safe
+===========
+It's not thread safe.
