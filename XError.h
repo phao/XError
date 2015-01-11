@@ -1,20 +1,24 @@
 #ifndef X_ERROR_H
 #define X_ERROR_H
 
-struct BasicString {
+struct XERR_String {
   char *data;
   int len;
 };
 
-struct ErrorInfo {
-  struct BasicString msg, file_name, func_name, code;
+struct XERR_Error {
   int line;
-  struct ErrorInfo *next;
+  struct XERR_String msg, file, func, code;
+};
+
+struct XERR_ErrorSequence {
+  size_t count;
+  struct XERR_Error *errors;
 };
 
 /**
- * Will attempt to link a new error node in the current structure. If that's
- * not possible, errors will be printed to the console.
+ * Will attempt to push a new error frame in the current internal structure.
+ * If that's not possible, errors will be printed to the console.
  *
  * Returns 0 on succes and negative values on failure.
  *
@@ -22,7 +26,7 @@ struct ErrorInfo {
  * It's meant to be used through the error macros below.
  */
 int
-XERR_LinkError(const char *msg,
+XERR_PushError(const char *msg,
                int line,
                const char *file_name,
                const char *func_name,
@@ -32,19 +36,15 @@ XERR_LinkError(const char *msg,
  * Copies and returns the current internal error structure. You're responsible
  * to call clean_error on it later.
  */
-struct ErrorInfo*
-XERR_CopyError(void);
+struct XERR_ErrorSequence
+XERR_CopyErrors(void);
 
-/**
- * Passing null as the argument will clean the internally kept error
- * structure.
- */
 void
-XERR_FreeError(struct ErrorInfo *err);
+XERR_FreeErrors(struct XERR_ErrorSequence err_seq);
 
 /*
  * Control flow macros for error handling that also sets error information
- * through XERR_LinkError calls.
+ * through XERR_PushError calls.
  *
  * You can always pass 0 (or any null-ish eqv) where MSG is required. This
  * will cause a 'messageless' error to be set up (file name and line number
@@ -60,7 +60,7 @@ XERR_FreeError(struct ErrorInfo *err);
 #define jErrLt0(EXPR, GOTO, MSG) \
   do { \
     if ((EXPR) < 0) { \
-      XERR_LinkError((MSG), __LINE__, __FILE__, __func__, # EXPR); \
+      XERR_PushError((MSG), __LINE__, __FILE__, __func__, # EXPR); \
       goto GOTO; \
     } \
   } while (0)
@@ -73,7 +73,7 @@ XERR_FreeError(struct ErrorInfo *err);
 #define jErrIf0(COND, LABEL, MSG) \
   do { \
     if (!(COND)) { \
-      XERR_LinkError((MSG), __LINE__, __FILE__, __func__, # COND); \
+      XERR_PushError((MSG), __LINE__, __FILE__, __func__, # COND); \
       goto LABEL; \
     } \
   } while (0)
@@ -86,7 +86,7 @@ XERR_FreeError(struct ErrorInfo *err);
 #define jErrIf(COND, LABEL, MSG) \
   do { \
     if ((COND)) { \
-      XERR_LinkError((MSG), __LINE__, __FILE__, __func__, # COND); \
+      XERR_PushError((MSG), __LINE__, __FILE__, __func__, # COND); \
       goto LABEL; \
     } \
   } while (0)
@@ -100,7 +100,7 @@ XERR_FreeError(struct ErrorInfo *err);
   do { \
     int X_ERROR_test = (EXPR); \
     if (X_ERROR_test < 0) { \
-      XERR_LinkError((MSG), __LINE__, __FILE__, __func__, # EXPR); \
+      XERR_PushError((MSG), __LINE__, __FILE__, __func__, # EXPR); \
       return X_ERROR_test; \
     } \
   } while (0)
@@ -112,7 +112,7 @@ XERR_FreeError(struct ErrorInfo *err);
  */
 #define ErrIf0(COND, VAL, MSG) do { \
     if (!(COND)) { \
-      XERR_LinkError((MSG), __LINE__, __FILE__, __func__, # COND); \
+      XERR_PushError((MSG), __LINE__, __FILE__, __func__, # COND); \
       return (VAL); \
     } \
   } while (0)
@@ -125,7 +125,7 @@ XERR_FreeError(struct ErrorInfo *err);
 #define ErrIf(COND, VAL, MSG) \
   do { \
     if (COND) { \
-      XERR_LinkError((MSG), __LINE__, __FILE__, __func__, # COND); \
+      XERR_PushError((MSG), __LINE__, __FILE__, __func__, # COND); \
       return (VAL); \
     } \
   } while (0)

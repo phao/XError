@@ -5,8 +5,8 @@ This is a small C library to help with error handling for error reporting.
 This library helps you deal with errors by capturing conditions which indicate
 that an error occured. These conditions are expressions and they're captured
 inside macro applications. One of these macros is the ErrLt0 macro, it checks
-if its given expression is less than 0, and if so it understands it as an error
-signal. For example:
+if its given expression is less than 0, and if so it understands that as an
+error signal. For example:
 
   ErrLt0(SDL_Init(SDL_INIT_VIDEO), SDL_GetError());
 
@@ -24,58 +24,68 @@ The header XError.h basically defines a set of foundations types and functions
 to report errors and a bunch of macros which help you make use of these
 underlying features.
 
-Basically, to report an error you use the XERR_LinkError functions:
+Basically, to report an error you use the XERR_PushError function:
 
   int
-  XERR_LinkError(const char *msg,
+  XERR_PushError(const char *msg,
                  int line,
                  const char *file_name,
                  const char *func_name,
                  const char *code);
 
 It copies all the content given to it to an internally managed structure of
-ErrorInfo elements:
+XERR_Error elements. It keeps its own internal XERR_ErrorStack.
 
-  struct ErrorInfo {
-    struct BasicString msg, file_name, func_name, code;
-    int line;
-    struct ErrorInfo *next;
-  };
-
-  struct BasicString {
+  struct XERR_String {
     char *data;
     int len;
   };
 
+  struct XERR_Error {
+    int line;
+    struct XERR_String msg, file, func, code;
+  };
+
+  struct XERR_ErrorStack {
+    size_t count;
+    struct XERR_Error *errors;
+  };
+
 The "<CODE TO ISSUE AN ERROR>" piece above makes use of the preprocessor to
-fill in the form for you by calling XERR_LinkError using facilities like
+fill in the form for you by calling XERR_PushError using facilities like
 __LINE__, __func__ and so on:
 
   #define ErrLt0(EXPR, MSG) \
     do { \
       int X_ERROR_test = (EXPR); \
       if (X_ERROR_test < 0) { \
-        XERR_LinkError((MSG), __LINE__, __FILE__, __func__, # EXPR); \
+        XERR_PushError((MSG), __LINE__, __FILE__, __func__, # EXPR); \
         return X_ERROR_test; \
       } \
     } while (0)
 
-XERR_LinkError allows you to pass it null as the message, in which case it
-won't error. It'll simply understand that there is no error message accompaning
-the issued error info. This is useful when you just want to propagate or pass
-on an error, but build a track of calls.
+XERR_PushError allows you to pass it null as the message, in which case it'll
+simply understand that there is no error message accompaning the issued error
+info. This is useful when you just want to pass on an error, but still build a
+track of calls:
 
   int
   InitSdl(void) {
     /* ... */
+
+    // Issues an error with its own message.
     ErrLt0(SDL_Init(SDL_INIT_VIDEO), SDL_GetError());
+
     /* ... */
   }
 
   int
   Init(void) {
     /* ... */
+
+    // Only propagates the error.
     ErrLt0(InitSdl(), 0);
+
     /* ... */
   }
 
@@ -87,13 +97,13 @@ This way, you can add macro applications to your code (which, yes, can make
 things messier), and have a sequence of error information structures be built
 for you whenever there is an error.
 
-When an error happens and you want to handle it, just don't propagate the
-error. Get the error return code and write some logic to deal with it. This
-library doesn't attempt to give you a general way for you to handle your
+When an error happens and you want to handle it, all you have to do is just not
+propagate it. Get the error return code and write some logic to deal with it.
+This library doesn't attempt to give you a general way for you to handle
 errors. What it gives you is a way to handle reporting errors when they happen.
-So to report an error, you copy the internal error structures kept by the
-XError library and go through it yourself to generate your error report. For
-example:
+
+To report an error, you copy the internal error structures kept by the XError
+library and go through it yourself to generate your error report. For example:
 
   static const char *
   FmtMessage(const char *msg, const char *alt) {
@@ -102,19 +112,20 @@ example:
 
   void
   ReportError(void) {
-    struct ErrorInfo *err = XERR_CopyError();
+    struct XERR_ErrorStack err_stack = XERR_CopyErrors();
     const char *fmt = "\t%s: L%d: %s: %s\n"
       "\t\t%s\n";
     fputs("Error! Aborting program.\n"
            "Bread Crumbs:\n"
            "=============\n", stderr);
-    for (struct ErrorInfo *p = err; p; p = p->next) {
+    for (size_t i = 0; i < err_stack.count; i++) {
+      struct XERR_Error *err = err_stack.errors[i];
       fprintf(stderr, fmt,
-        FmtMessage(p->file_name.data, "(missing file name)"),
+        FmtMessage(err->file_name.data, "(missing file name)"),
         p->line,
-        FmtMessage(p->func_name.data, "(missing function name)"),
-        FmtMessage(p->msg.data, "(missing message)"),
-        FmtMessage(p->code.data, "(missing code)"));
+        FmtMessage(err->func_name.data, "(missing function name)"),
+        FmtMessage(err->msg.data, "(missing message)"),
+        FmtMessage(err->code.data, "(missing code)"));
     }
     fmt = "\n\tSDL_GetError() => %s\n"
       "\tIMG_GetError() => %s\n"
@@ -125,32 +136,18 @@ example:
       FmtMessage(IMG_GetError(), "(empty)"),
       FmtMessage(TTF_GetError(), "(empty)"),
       FmtMessage(Mix_GetError(), "(empty)"));
-    if (err) {
-      XERR_FreeError(err);
-    }
+    XERR_FreeErrors(err_stack);
   }
 
-XERR_CopyError will copy the whole internal structure and give it to you. It's
-a linked list as the ErrorInfo struct suggests. And you can then traverse it
-as such. XERR_FreeError will free the memory allocated by XERR_CopyError in
-the process of copying the internal error structure.
+The XERR_ErrorStack is a small struct (pointer and a size variable), which is
+why it's passed by value everywhere.
 
-  Attention: XERR_FreeError(0) will free the internal structure. It'll clean
-  it up and forget about it so you can start over tracking errors.
+XERR_CopyErrors will copy the whole internal structure and give it to you. It's
+an array of XERR_Error objects together with a size variable that tells you
+how many XERR_Error objects you should be looking at.
 
-Contention Points
-=================
-- XERR_FreeError might be modified to do nothing if given null. A new function
-would be introduced to free the internal structure.
-- The prefix may change to XErr. XERR seems too ugly.
-- The error structure collection may be changed from a linked list into an
-array.
-
-This last entry deserves some comment.
-
-Even though internally for the XError library things get easy when a linked
-list is used, and one will probably still be used. For the programmer calling
-XERR_CopyError, there is no good reason for not giving back an array.
+XERR_FreeErrors will free the memory allocated by XERR_CopyError in the process
+of copying the internal error structure.
 
 XFlow
 =====
@@ -196,6 +193,6 @@ As seen previously, some of the macros make use of local variables to avoid
 double evaluation. Whenever those are used, they're prefixed with X_ERROR_ or
 X_FLOW_, so you should avoid those names in your code.
 
-Thread Safe
-===========
-It's not thread safe.
+Thread Safe and Reentrancy
+==========================
+It's not thread safe. There is also no effort to make the code reentrant.

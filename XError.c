@@ -1,15 +1,18 @@
+#include <assert.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "XError.h"
 
-static struct ErrorInfo *err_info;
+static struct XERR_ErrorSequence err_seq;
+static size_t stack_cap;
 
 static int
-SetString(struct BasicString *string, const char *src) {
+SetString(struct XERR_String *string, const char *src) {
   if (src) {
-    int src_len = strlen(src);
+    size_t src_len = strlen(src);
     free(string->data);
     string->data = malloc(src_len+1);
     if (!string->data) {
@@ -26,80 +29,121 @@ SetString(struct BasicString *string, const char *src) {
   return 0;
 }
 
-static struct ErrorInfo*
-LinkErrorTo(struct ErrorInfo *old_head,
+static void
+ErrorSetup(struct XERR_Error *err,
             const char *msg,
             int line,
-            const char *file_name,
-            const char *func_name,
+            const char *file,
+            const char *func,
             const char *code)
 {
-  struct ErrorInfo *new_head = malloc(sizeof (struct ErrorInfo));
-  if (!new_head) {
-    return 0;
-  }
-  new_head->line = line;
-  new_head->next = old_head;
-  new_head->msg.data = 0;
-  new_head->file_name.data = 0;
-  new_head->func_name.data= 0;
-  new_head->code.data = 0;
-  ErrIgnore(SetString(&new_head->msg, msg));
-  ErrIgnore(SetString(&new_head->file_name, file_name));
-  ErrIgnore(SetString(&new_head->func_name, func_name));
-  ErrIgnore(SetString(&new_head->code, code));
-  return new_head;
+  err->line = line;
+  err->msg.data = 0;
+  err->file.data = 0;
+  err->func.data = 0;
+  err->code.data = 0;
+  ErrIgnore(SetString(&err->msg, msg));
+  ErrIgnore(SetString(&err->file, file));
+  ErrIgnore(SetString(&err->func, func));
+  ErrIgnore(SetString(&err->code, code));
 }
 
 int
-XERR_LinkError(const char *msg,
+XERR_PushError(const char *msg,
                int line,
-               const char *file_name,
-               const char *func_name,
+               const char *file,
+               const char *func,
                const char *code)
 {
-  struct ErrorInfo *new_head = LinkErrorTo(err_info, msg, line, file_name,
-    func_name, code);
-  if (!new_head
-      || (!new_head->msg.data && msg)
-      || (!new_head->file_name.data && file_name)
-      || (!new_head->func_name.data && func_name)
-      || (!new_head->code.data && code))
-  {
-    fprintf(stderr, "%s: %s: %d: %s\n\t%s\n", file_name, func_name, line, msg,
-      code);
-    return -1;
+  if (err_seq.count == stack_cap) {
+    size_t delta_cap = stack_cap/5 + 10;
+    if (stack_cap > SIZE_MAX - delta_cap) {
+      return -1;
+    }
+    size_t new_cap = stack_cap + delta_cap;
+    void *newp = realloc(err_seq.errors, new_cap);
+    if (!newp) {
+      return -1;
+    }
+    err_seq.errors = newp;
+    stack_cap = new_cap;
   }
-  err_info = new_head;
+  struct XERR_Error *err = err_seq.errors + err_seq.count;
+  ErrorSetup(err, msg, line, file, func, code);
+  if ((!err->msg.data && msg)
+      || (!err->file.data && file)
+      || (!err->func.data && func)
+      || (!err->code.data && code))
+  {
+    fprintf(stderr, "%s: %s: %d: %s\n\t%s\n", file, func, line, msg,
+      code);
+  }
   return 0;
 }
 
-struct ErrorInfo*
-XERR_CopyError(void) {
-  struct ErrorInfo *out = 0;
-  for (struct ErrorInfo *n = err_info; n; n = n->next) {
-    struct ErrorInfo *aux = LinkErrorTo(out, n->msg.data, n->line,
-      n->file_name.data, n->func_name.data, n->code.data);
-    if (aux) {
-      out = aux;
-    }
+static inline void
+CopyStringWithBuffer(struct XERR_String *out,
+                     const struct XERR_String *in,
+                     char **buffer)
+{
+  out->data = *buffer;
+  strcpy(out->data, in->data);
+  out->len = in->len;
+  *buffer += out->len+1;
+}
+
+struct XERR_ErrorSequence
+XERR_CopyErrors(void) {
+  struct XERR_ErrorSequence out_seq;
+
+  // Count text bytes.
+  size_t text_bytes = 0;
+  for (size_t i = 0; i < err_seq.count; i++) {
+    struct XERR_Error *in_err = err_seq.errors + i;
+    text_bytes += in_err->msg.len + 1;
+    text_bytes += in_err->file.len + 1;
+    text_bytes += in_err->func.len + 1;
+    text_bytes += in_err->code.len + 1;
   }
-  return out;
+
+  // Allocate bytes for output.
+  out_seq.errors = malloc(err_seq.count * sizeof (struct XERR_Error));
+  if (!out_seq.errors) {
+    // If couldn't allocate, the null `errors` member will indicate the
+    // error.
+    return out_seq;
+  }
+  char *text_buffer = malloc(text_bytes);
+  if (!text_buffer) {
+    free(out_seq.errors);
+    out_seq.errors = 0;
+    return out_seq;
+  }
+  out_seq.count = err_seq.count;
+
+  // At this point on, no more errors can appear.
+
+  assert(text_buffer);
+  assert(out_seq.errors);
+  assert(out_seq.count == err_seq.count);
+
+  for (size_t i = 0; i < out_seq.count; i++) {
+    const struct XERR_Error *in_err = err_seq.errors + i;
+    struct XERR_Error *out_err = out_seq.errors + i;
+    out_err->line = in_err->line;
+    CopyStringWithBuffer(&out_err->msg, &in_err->msg, &text_buffer);
+    CopyStringWithBuffer(&out_err->file, &in_err->file, &text_buffer);
+    CopyStringWithBuffer(&out_err->func, &in_err->func, &text_buffer);
+    CopyStringWithBuffer(&out_err->code, &in_err->code, &text_buffer);
+  }
+
+  return out_seq;
 }
 
 void
-XERR_FreeError(struct ErrorInfo *err) {
-  if (!err) {
-    err = err_info;
-    err_info = 0;
-  }
-  while (err) {
-    struct ErrorInfo *aux = err->next;
-    free(err->msg.data);
-    free(err->file_name.data);
-    free(err->func_name.data);
-    free(err->code.data);
-    free(err);
-    err = aux;
+XERR_FreeErrors(struct XERR_ErrorSequence err_seq) {
+  if (err_seq.errors) {
+    free(err_seq.errors->msg.data);
+    free(err_seq.errors);
   }
 }
