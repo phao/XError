@@ -34,7 +34,7 @@ Basically, to report an error you use the XERR_PushError function:
                  const char *code);
 
 It copies all the content given to it to an internally managed structure of
-XERR_Error elements. It keeps its own internal XERR_ErrorStack.
+XERR_Error elements. It keeps its own internal XERR_ErrorSequence.
 
   struct XERR_String {
     char *data;
@@ -46,7 +46,7 @@ XERR_Error elements. It keeps its own internal XERR_ErrorStack.
     struct XERR_String msg, file, func, code;
   };
 
-  struct XERR_ErrorStack {
+  struct XERR_ErrorSequence {
     size_t count;
     struct XERR_Error *errors;
   };
@@ -112,14 +112,14 @@ library and go through it yourself to generate your error report. For example:
 
   void
   ReportError(void) {
-    struct XERR_ErrorStack err_stack = XERR_CopyErrors();
+    struct XERR_ErrorSequence err_seq = XERR_CopyErrors();
     const char *fmt = "\t%s: L%d: %s: %s\n"
       "\t\t%s\n";
     fputs("Error! Aborting program.\n"
            "Bread Crumbs:\n"
            "=============\n", stderr);
-    for (size_t i = 0; i < err_stack.count; i++) {
-      struct XERR_Error *err = err_stack.errors[i];
+    for (size_t i = 0; i < err_seq.count; i++) {
+      struct XERR_Error *err = err_seq.errors[i];
       fprintf(stderr, fmt,
         FmtMessage(err->file_name.data, "(missing file name)"),
         p->line,
@@ -136,11 +136,11 @@ library and go through it yourself to generate your error report. For example:
       FmtMessage(IMG_GetError(), "(empty)"),
       FmtMessage(TTF_GetError(), "(empty)"),
       FmtMessage(Mix_GetError(), "(empty)"));
-    XERR_FreeErrors(err_stack);
+    XERR_FreeErrors(err_seq);
     XERR_ClearInternalSequence();
   }
 
-The XERR_ErrorStack is a small struct (pointer and a size variable), which is
+The XERR_ErrorSequence is a small struct (pointer and a size variable), which is
 why it's passed by value everywhere.
 
 XERR_CopyErrors will copy the whole internal structure and give it to you. It's
