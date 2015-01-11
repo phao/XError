@@ -42,6 +42,9 @@ XERR_CopyErrors(void);
 void
 XERR_FreeErrors(struct XERR_ErrorSequence err_seq);
 
+void
+XERR_ClearInternalSequence(void);
+
 /*
  * Control flow macros for error handling that also sets error information
  * through XERR_PushError calls.

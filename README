@@ -137,6 +137,7 @@ library and go through it yourself to generate your error report. For example:
       FmtMessage(TTF_GetError(), "(empty)"),
       FmtMessage(Mix_GetError(), "(empty)"));
     XERR_FreeErrors(err_stack);
+    XERR_ClearInternalSequence();
   }
 
 The XERR_ErrorStack is a small struct (pointer and a size variable), which is
@@ -148,6 +149,11 @@ how many XERR_Error objects you should be looking at.
 
 XERR_FreeErrors will free the memory allocated by XERR_CopyError in the process
 of copying the internal error structure.
+
+XERR_ClearInternalSequence will clear XError's internal sequence so that
+a new one can be built from scratch. This is useful if you managed to handle
+the error, in which case you'd like XError to stop appending onto the old
+sequence and start a new one.
 
 XFlow
 =====

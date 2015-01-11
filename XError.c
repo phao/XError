@@ -56,7 +56,7 @@ XERR_PushError(const char *msg,
                const char *code)
 {
   if (err_seq.count == stack_cap) {
-    size_t delta_cap = stack_cap/5 + 10;
+    size_t delta_cap = stack_cap/5 + 30;
     if (stack_cap > SIZE_MAX - delta_cap) {
       return -1;
     }
@@ -70,13 +70,13 @@ XERR_PushError(const char *msg,
   }
   struct XERR_Error *err = err_seq.errors + err_seq.count;
   ErrorSetup(err, msg, line, file, func, code);
+  err_seq.count++;
   if ((!err->msg.data && msg)
       || (!err->file.data && file)
       || (!err->func.data && func)
       || (!err->code.data && code))
   {
-    fprintf(stderr, "%s: %s: %d: %s\n\t%s\n", file, func, line, msg,
-      code);
+    fprintf(stderr, "%s: %s: %d: %s\n\t%s\n", file, func, line, msg, code);
   }
   return 0;
 }
@@ -146,4 +146,15 @@ XERR_FreeErrors(struct XERR_ErrorSequence err_seq) {
     free(err_seq.errors->msg.data);
     free(err_seq.errors);
   }
+}
+
+void
+XERR_ClearInternalSequence(void) {
+  for (size_t i = 0; i < err_seq.count; i++) {
+    free(err_seq.errors[i].msg.data);
+    free(err_seq.errors[i].file.data);
+    free(err_seq.errors[i].func.data);
+    free(err_seq.errors[i].code.data);
+  }
+  err_seq.count = 0;
 }
