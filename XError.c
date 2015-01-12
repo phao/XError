@@ -89,12 +89,18 @@ CopyStringWithBuffer(struct XERR_String *out,
                      const struct XERR_String *in,
                      char **buffer)
 {
+  // Null check is needed because it's very common for null being used as
+  // a message (for pass-through errors).
   if (in->data) {
     assert(*buffer);
     out->data = *buffer;
     strcpy(out->data, in->data);
     out->len = in->len;
     *buffer += out->len+1;
+  }
+  else {
+    out->data = 0;
+    out->len = -1;
   }
 }
 
