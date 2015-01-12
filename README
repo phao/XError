@@ -105,7 +105,7 @@ errors. What it gives you is a way to handle reporting errors when they happen.
 To report an error, you copy the internal error structures kept by the XError
 library and go through it yourself to generate your error report. For example:
 
-  static const char *
+  static inline const char *
   FmtMessage(const char *msg, const char *alt) {
     return msg ? (*msg ? msg : alt) : alt;
   }
@@ -119,11 +119,11 @@ library and go through it yourself to generate your error report. For example:
            "Bread Crumbs:\n"
            "=============\n", stderr);
     for (size_t i = 0; i < err_seq.count; i++) {
-      struct XERR_Error *err = err_seq.errors[i];
+      struct XERR_Error *err = err_seq.errors + i;
       fprintf(stderr, fmt,
-        FmtMessage(err->file_name.data, "(missing file name)"),
+        FmtMessage(err->file.data, "(missing file name)"),
         p->line,
-        FmtMessage(err->func_name.data, "(missing function name)"),
+        FmtMessage(err->func.data, "(missing function name)"),
         FmtMessage(err->msg.data, "(missing message)"),
         FmtMessage(err->code.data, "(missing code)"));
     }

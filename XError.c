@@ -61,7 +61,10 @@ XERR_PushError(const char *msg,
       return -1;
     }
     size_t new_cap = stack_cap + delta_cap;
-    void *newp = realloc(err_seq.errors, new_cap);
+    if (new_cap > SIZE_MAX / sizeof (struct XERR_Error)) {
+      return -1;
+    }
+    void *newp = realloc(err_seq.errors, new_cap * sizeof (struct XERR_Error));
     if (!newp) {
       return -1;
     }
@@ -86,10 +89,13 @@ CopyStringWithBuffer(struct XERR_String *out,
                      const struct XERR_String *in,
                      char **buffer)
 {
-  out->data = *buffer;
-  strcpy(out->data, in->data);
-  out->len = in->len;
-  *buffer += out->len+1;
+  if (in->data) {
+    assert(*buffer);
+    out->data = *buffer;
+    strcpy(out->data, in->data);
+    out->len = in->len;
+    *buffer += out->len+1;
+  }
 }
 
 struct XERR_ErrorSequence
