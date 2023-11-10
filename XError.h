@@ -120,7 +120,7 @@ XERR_ClearInternalSequence(void);
     } \
   } while (0)
 
-#define PErrIf0(EXPR) ErrIf0(COND, VAL, 0)
+#define PErrIf0(COND, VAL) ErrIf0(COND, VAL, 0)
 
 /**
  * If (COND), set error information and return VAL.
